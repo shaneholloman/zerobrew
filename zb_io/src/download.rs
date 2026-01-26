@@ -33,10 +33,10 @@ fn get_alternate_urls(primary_url: &str) -> Vec<String> {
     if let Ok(mirrors) = std::env::var("HOMEBREW_BOTTLE_MIRRORS") {
         for mirror in mirrors.split(',') {
             let mirror = mirror.trim();
-            if !mirror.is_empty() {
-                if let Some(alt) = transform_url_to_mirror(primary_url, mirror) {
-                    alternates.push(alt);
-                }
+            if !mirror.is_empty()
+                && let Some(alt) = transform_url_to_mirror(primary_url, mirror)
+            {
+                alternates.push(alt);
             }
         }
     }
@@ -363,10 +363,10 @@ async fn fetch_bearer_token_internal(
     // Check cache first
     {
         let cache = token_cache.read().await;
-        if let Some(cached) = cache.get(&scope) {
-            if cached.expires_at > Instant::now() {
-                return Ok(cached.token.clone());
-            }
+        if let Some(cached) = cache.get(&scope)
+            && cached.expires_at > Instant::now()
+        {
+            return Ok(cached.token.clone());
         }
     }
 

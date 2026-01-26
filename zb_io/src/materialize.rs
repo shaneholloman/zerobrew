@@ -158,14 +158,14 @@ fn patch_homebrew_placeholders(
             e.file_type().is_file()
         })
         .filter(|e| {
-            if let Ok(data) = fs::read(e.path()) {
-                if data.len() >= 4 {
-                    let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
-                    return matches!(
-                        magic,
-                        0xfeedface | 0xfeedfacf | 0xcafebabe | 0xcefaedfe | 0xcffaedfe
-                    );
-                }
+            if let Ok(data) = fs::read(e.path())
+                && data.len() >= 4
+            {
+                let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+                return matches!(
+                    magic,
+                    0xfeedface | 0xfeedfacf | 0xcafebabe | 0xcefaedfe | 0xcffaedfe
+                );
             }
             false
         })
@@ -189,21 +189,21 @@ fn patch_homebrew_placeholders(
         }
 
         // Fix version mismatches for this package
-        if let Some(re) = &version_regex {
-            if re.is_match(&new_path) {
-                let replacement = format!("/{}/{}/", pkg_name, pkg_version);
-                let fixed = re.replace(&new_path, |caps: &regex::Captures| {
-                    let matched_version = &caps[2];
-                    if matched_version != pkg_version {
-                        replacement.clone()
-                    } else {
-                        caps[0].to_string()
-                    }
-                });
-                if fixed != new_path {
-                    new_path = fixed.to_string();
-                    changed = true;
+        if let Some(re) = &version_regex
+            && re.is_match(&new_path)
+        {
+            let replacement = format!("/{}/{}/", pkg_name, pkg_version);
+            let fixed = re.replace(&new_path, |caps: &regex::Captures| {
+                let matched_version = &caps[2];
+                if matched_version != pkg_version {
+                    replacement.clone()
+                } else {
+                    caps[0].to_string()
                 }
+            });
+            if fixed != new_path {
+                new_path = fixed.to_string();
+                changed = true;
             }
         }
 
@@ -240,22 +240,21 @@ fn patch_homebrew_placeholders(
         if let Ok(output) = Command::new("otool")
             .args(["-L", &path.to_string_lossy()])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    let line = line.trim();
-                    if let Some(old_path) = line.split_whitespace().next() {
-                        if let Some(new_path) = patch_path(old_path) {
-                            let result = Command::new("install_name_tool")
-                                .args(["-change", old_path, &new_path, &path.to_string_lossy()])
-                                .output();
-                            if result.is_ok() {
-                                patched_any = true;
-                            } else {
-                                patch_failures.fetch_add(1, Ordering::Relaxed);
-                            }
-                        }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let line = line.trim();
+                if let Some(old_path) = line.split_whitespace().next()
+                    && let Some(new_path) = patch_path(old_path)
+                {
+                    let result = Command::new("install_name_tool")
+                        .args(["-change", old_path, &new_path, &path.to_string_lossy()])
+                        .output();
+                    if result.is_ok() {
+                        patched_any = true;
+                    } else {
+                        patch_failures.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             }
@@ -265,24 +264,23 @@ fn patch_homebrew_placeholders(
         if let Ok(output) = Command::new("otool")
             .args(["-D", &path.to_string_lossy()])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines().skip(1) {
-                    // Skip first line (filename)
-                    let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-                    if let Some(new_id) = patch_path(line) {
-                        let result = Command::new("install_name_tool")
-                            .args(["-id", &new_id, &path.to_string_lossy()])
-                            .output();
-                        if result.is_ok() {
-                            patched_any = true;
-                        } else {
-                            patch_failures.fetch_add(1, Ordering::Relaxed);
-                        }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines().skip(1) {
+                // Skip first line (filename)
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if let Some(new_id) = patch_path(line) {
+                    let result = Command::new("install_name_tool")
+                        .args(["-id", &new_id, &path.to_string_lossy()])
+                        .output();
+                    if result.is_ok() {
+                        patched_any = true;
+                    } else {
+                        patch_failures.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             }

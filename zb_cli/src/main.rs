@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -83,14 +83,14 @@ async fn main() {
 }
 
 /// Check if zerobrew directories need initialization
-fn needs_init(root: &PathBuf, prefix: &PathBuf) -> bool {
+fn needs_init(root: &Path, prefix: &Path) -> bool {
     // Check if directories exist and are writable
     let root_ok = root.exists() && is_writable(root);
     let prefix_ok = prefix.exists() && is_writable(prefix);
     !(root_ok && prefix_ok)
 }
 
-fn is_writable(path: &PathBuf) -> bool {
+fn is_writable(path: &Path) -> bool {
     if !path.exists() {
         return false;
     }
@@ -106,16 +106,16 @@ fn is_writable(path: &PathBuf) -> bool {
 }
 
 /// Run initialization - create directories and set permissions
-fn run_init(root: &PathBuf, prefix: &PathBuf) -> Result<(), String> {
+fn run_init(root: &Path, prefix: &Path) -> Result<(), String> {
     println!("{} Initializing zerobrew...", style("==>").cyan().bold());
 
-    let dirs_to_create = vec![
-        root.clone(),
+    let dirs_to_create: Vec<PathBuf> = vec![
+        root.to_path_buf(),
         root.join("store"),
         root.join("db"),
         root.join("cache"),
         root.join("locks"),
-        prefix.clone(),
+        prefix.to_path_buf(),
         prefix.join("bin"),
         prefix.join("Cellar"),
     ];
@@ -127,7 +127,7 @@ fn run_init(root: &PathBuf, prefix: &PathBuf) -> Result<(), String> {
         } else {
             // Check parent
             d.parent()
-                .map(|p| p.exists() && !is_writable(&p.to_path_buf()))
+                .map(|p| p.exists() && !is_writable(p))
                 .unwrap_or(true)
         }
     });
@@ -191,7 +191,7 @@ fn run_init(root: &PathBuf, prefix: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn add_to_path(prefix: &PathBuf) -> Result<(), String> {
+fn add_to_path(prefix: &Path) -> Result<(), String> {
     let shell = std::env::var("SHELL").unwrap_or_default();
     let home = std::env::var("HOME").map_err(|_| "HOME not set")?;
 
@@ -253,7 +253,7 @@ fn add_to_path(prefix: &PathBuf) -> Result<(), String> {
 }
 
 /// Ensure zerobrew is initialized, prompting user if needed
-fn ensure_init(root: &PathBuf, prefix: &PathBuf) -> Result<(), zb_core::Error> {
+fn ensure_init(root: &Path, prefix: &Path) -> Result<(), zb_core::Error> {
     if !needs_init(root, prefix) {
         return Ok(());
     }
@@ -403,10 +403,10 @@ async fn run(cli: Cli) -> Result<(), zb_core::Error> {
                         downloaded,
                         total_bytes,
                     } => {
-                        if let Some(pb) = bars.get(&name) {
-                            if total_bytes.is_some() {
-                                pb.set_position(downloaded);
-                            }
+                        if let Some(pb) = bars.get(&name)
+                            && total_bytes.is_some()
+                        {
+                            pb.set_position(downloaded);
                         }
                     }
                     InstallProgress::DownloadCompleted { name, total_bytes } => {

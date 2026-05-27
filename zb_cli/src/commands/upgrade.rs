@@ -17,6 +17,10 @@ pub async fn execute(
 ) -> Result<(), zb_core::Error> {
     let start = Instant::now();
 
+    // Reported at the end so explicit-arg upgrades still run; we exit
+    // non-zero afterwards rather than discard partial progress.
+    let mut missing: Vec<String> = Vec::new();
+
     let outdated = if formulas.is_empty() {
         ui.heading("Checking for outdated packages...".to_string())
             .map_err(ui_error)?;
@@ -46,11 +50,15 @@ pub async fn execute(
                 Err(zb_core::Error::NotInstalled { .. }) => {
                     ui.error(format!("{} is not installed", name))
                         .map_err(ui_error)?;
+                    missing.push(name.clone());
                 }
                 Err(e) => return Err(e),
             }
         }
         if outdated.is_empty() {
+            if let Some(name) = missing.into_iter().next() {
+                return Err(zb_core::Error::NotInstalled { name });
+            }
             ui.info("All specified packages are up to date.".to_string())
                 .map_err(ui_error)?;
             return Ok(());
@@ -196,7 +204,12 @@ pub async fn execute(
     let elapsed = start.elapsed();
     ui.blank_line().map_err(ui_error)?;
 
-    if errors.is_empty() {
+    for (name, err) in &errors {
+        ui.error(format!("Failed to upgrade {}: {}", style(name).bold(), err))
+            .map_err(ui_error)?;
+    }
+
+    if errors.is_empty() && missing.is_empty() {
         ui.heading(format!(
             "Upgraded {} packages in {:.2}s",
             style(upgraded).green().bold(),
@@ -204,12 +217,12 @@ pub async fn execute(
         ))
         .map_err(ui_error)?;
         Ok(())
-    } else {
-        for (name, err) in &errors {
-            ui.error(format!("Failed to upgrade {}: {}", style(name).bold(), err))
-                .map_err(ui_error)?;
-        }
+    } else if !errors.is_empty() {
         Err(errors.remove(0).1)
+    } else {
+        Err(zb_core::Error::NotInstalled {
+            name: missing.remove(0),
+        })
     }
 }
 

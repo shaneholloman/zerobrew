@@ -174,10 +174,8 @@ impl Formula {
         #[cfg(not(target_os = "macos"))]
         let deps = {
             let mut deps = deps;
-            for u in &self.uses_from_macos {
-                if !deps.iter().any(|dep| dep == u.name()) {
-                    deps.push(u.name().to_string());
-                }
+            for u in self.active_uses_from_macos() {
+                push_unique_dep(&mut deps, u.name());
             }
             deps
         };
@@ -188,13 +186,13 @@ impl Formula {
         let mut deps = self.platform_dependencies();
 
         #[cfg(not(target_os = "macos"))]
-        for dep in self
-            .uses_from_macos
-            .iter()
-            .filter(|dep| dep.is_runtime_dependency())
         {
-            if !deps.iter().any(|existing| existing == dep.name()) {
-                deps.push(dep.name().to_string());
+            for dep in self
+                .active_uses_from_macos()
+                .iter()
+                .filter(|dep| dep.is_runtime_dependency())
+            {
+                push_unique_dep(&mut deps, dep.name());
             }
         }
 
@@ -226,6 +224,37 @@ impl Formula {
             }
         }
         None
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn active_uses_from_macos(&self) -> Vec<UsesFromMacos> {
+        #[cfg(target_os = "linux")]
+        if let Some(deps) = self.variation_uses_from_macos(preferred_linux_variation_keys()) {
+            return deps;
+        }
+
+        self.uses_from_macos.clone()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn variation_uses_from_macos(&self, keys: &[&str]) -> Option<Vec<UsesFromMacos>> {
+        let variations = self.variations.as_ref()?.as_object()?;
+        for key in keys {
+            if let Some(value) = variations
+                .get(*key)
+                .and_then(|variation| variation.get("uses_from_macos"))
+            {
+                return serde_json::from_value(value.clone()).ok();
+            }
+        }
+        None
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn push_unique_dep(deps: &mut Vec<String>, name: &str) {
+    if !deps.iter().any(|existing| existing == name) {
+        deps.push(name.to_string());
     }
 }
 
@@ -522,6 +551,37 @@ mod tests {
                 "openssl@3".to_string(),
                 "zlib-ng-compat".to_string(),
                 "expat".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    fn runtime_dependencies_include_linux_variation_uses_from_macos() {
+        let mut formula: Formula =
+            serde_json::from_str(include_str!("../../fixtures/formula_foo.json")).unwrap();
+        formula.dependencies = vec!["openssl@3".to_string()];
+        formula.uses_from_macos = vec![UsesFromMacos::Plain("expat".to_string())];
+        formula.variations = Some(serde_json::json!({
+            "x86_64_linux": {
+                "dependencies": ["openssl@3", "zlib-ng-compat"],
+                "uses_from_macos": ["libffi", { "pkgconf": "build" }]
+            },
+            "arm64_linux": {
+                "dependencies": ["openssl@3", "zlib-ng-compat"],
+                "uses_from_macos": ["libffi", { "pkgconf": "build" }]
+            }
+        }));
+
+        assert_eq!(
+            formula.runtime_dependencies(),
+            vec![
+                "openssl@3".to_string(),
+                "zlib-ng-compat".to_string(),
+                "libffi".to_string()
             ]
         );
     }

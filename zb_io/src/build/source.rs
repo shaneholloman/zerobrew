@@ -27,8 +27,11 @@ pub async fn download_and_extract_source(
 }
 
 async fn download_source(url: &str, dest: &Path) -> Result<(), Error> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(300));
+    if let Some(tls_config) = crate::network::tls::shared_tls_config() {
+        builder = builder.use_preconfigured_tls(tls_config);
+    }
+    let client = builder
         .build()
         .map_err(Error::network("failed to create HTTP client"))?;
 

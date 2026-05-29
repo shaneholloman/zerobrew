@@ -9,6 +9,20 @@ pub struct SelectedBottle {
 
 const MACOS_CODENAMES_NEWEST_FIRST: &[&str] = &["tahoe", "sequoia", "sonoma", "ventura"];
 
+#[cfg(any(target_os = "linux", test))]
+fn preferred_linux_bottle_tags_for_arch(arch: &str) -> &'static [&'static str] {
+    match arch {
+        "aarch64" => &["arm64_linux", "aarch64_linux"],
+        "x86_64" => &["x86_64_linux"],
+        _ => &[],
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn preferred_linux_bottle_tags() -> &'static [&'static str] {
+    preferred_linux_bottle_tags_for_arch(std::env::consts::ARCH)
+}
+
 #[cfg(target_os = "macos")]
 pub fn macos_major_version() -> Option<u32> {
     let output = std::process::Command::new("sw_vers")
@@ -92,11 +106,10 @@ fn select_bottle_with_version(
 
     #[cfg(target_os = "linux")]
     {
-        let linux_tags = ["x86_64_linux"];
-        for preferred_tag in linux_tags {
+        for preferred_tag in preferred_linux_bottle_tags() {
             if let Some(file) = formula.bottle.stable.files.get(preferred_tag) {
                 return Ok(SelectedBottle {
-                    tag: preferred_tag.to_string(),
+                    tag: (*preferred_tag).to_string(),
                     url: file.url.clone(),
                     sha256: file.sha256.clone(),
                 });
@@ -212,6 +225,22 @@ mod tests {
                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             );
         }
+    }
+
+    #[test]
+    fn linux_arm_prefers_arm64_bottle_tags() {
+        assert_eq!(
+            preferred_linux_bottle_tags_for_arch("aarch64"),
+            &["arm64_linux", "aarch64_linux"]
+        );
+    }
+
+    #[test]
+    fn linux_x86_64_prefers_x86_64_bottle_tags() {
+        assert_eq!(
+            preferred_linux_bottle_tags_for_arch("x86_64"),
+            &["x86_64_linux"]
+        );
     }
 
     #[test]

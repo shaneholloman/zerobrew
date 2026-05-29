@@ -21,7 +21,7 @@ pub fn resolve_closure(
     for &idx in &closure {
         let formula = &formulas[idx_to_name[idx]];
         let mut dep_indices: Vec<usize> = formula
-            .dependencies
+            .runtime_dependencies()
             .iter()
             .filter_map(|dep| {
                 let &di = name_to_idx.get(dep.as_str())?;
@@ -91,7 +91,7 @@ fn compute_closure(
         }
 
         let formula = &formulas[idx_to_name[idx]];
-        for dep in &formula.dependencies {
+        for dep in formula.runtime_dependencies() {
             if let Some(&di) = name_to_idx.get(dep.as_str())
                 && !closure.contains(&di)
             {
@@ -188,5 +188,20 @@ mod tests {
         let order = resolve_closure(&["git".to_string()], &formulas).unwrap();
         // Should successfully resolve with just git and gettext
         assert_eq!(order, vec!["gettext", "git"]);
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn resolves_uses_from_macos_runtime_dependencies_on_linux() {
+        let mut formulas = BTreeMap::new();
+        let mut python = formula("python@3.14", &["openssl@3"]);
+        python.uses_from_macos = vec![crate::UsesFromMacos::Plain("expat".to_string())];
+
+        formulas.insert("python@3.14".to_string(), python);
+        formulas.insert("openssl@3".to_string(), formula("openssl@3", &[]));
+        formulas.insert("expat".to_string(), formula("expat", &[]));
+
+        let order = resolve_closure(&["python@3.14".to_string()], &formulas).unwrap();
+        assert_eq!(order, vec!["expat", "openssl@3", "python@3.14"]);
     }
 }

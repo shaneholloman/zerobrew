@@ -47,7 +47,7 @@ impl BuildPlan {
             source_checksum: source.checksum.clone(),
             ruby_source_path: formula.ruby_source_path.clone(),
             build_dependencies: all_build_deps,
-            runtime_dependencies: formula.dependencies.clone(),
+            runtime_dependencies: formula.runtime_dependencies(),
             detected_system,
             prefix: prefix.to_path_buf(),
             cellar_path,

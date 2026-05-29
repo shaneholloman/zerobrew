@@ -92,6 +92,20 @@ impl UsesFromMacos {
             UsesFromMacos::WithContext { name, .. } => name,
         }
     }
+
+    pub fn is_runtime_dependency(&self) -> bool {
+        match self {
+            UsesFromMacos::Plain(_) => true,
+            UsesFromMacos::WithContext { context, .. } => context == "runtime",
+        }
+    }
+
+    pub fn is_build_dependency(&self) -> bool {
+        match self {
+            UsesFromMacos::Plain(_) => false,
+            UsesFromMacos::WithContext { context, .. } => context == "build",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -161,11 +175,66 @@ impl Formula {
         let deps = {
             let mut deps = deps;
             for u in &self.uses_from_macos {
-                deps.push(u.name().to_string());
+                if !deps.iter().any(|dep| dep == u.name()) {
+                    deps.push(u.name().to_string());
+                }
             }
             deps
         };
         deps
+    }
+
+    pub fn runtime_dependencies(&self) -> Vec<String> {
+        let mut deps = self.platform_dependencies();
+
+        #[cfg(not(target_os = "macos"))]
+        for dep in self
+            .uses_from_macos
+            .iter()
+            .filter(|dep| dep.is_runtime_dependency())
+        {
+            if !deps.iter().any(|existing| existing == dep.name()) {
+                deps.push(dep.name().to_string());
+            }
+        }
+
+        deps
+    }
+
+    fn platform_dependencies(&self) -> Vec<String> {
+        #[cfg(target_os = "linux")]
+        if let Some(deps) = self.variation_dependencies(preferred_linux_variation_keys()) {
+            return deps;
+        }
+
+        self.dependencies.clone()
+    }
+
+    fn variation_dependencies(&self, keys: &[&str]) -> Option<Vec<String>> {
+        let variations = self.variations.as_ref()?.as_object()?;
+        for key in keys {
+            if let Some(deps) = variations
+                .get(*key)
+                .and_then(|variation| variation.get("dependencies"))
+                .and_then(|deps| deps.as_array())
+            {
+                return Some(
+                    deps.iter()
+                        .filter_map(|dep| dep.as_str().map(ToString::to_string))
+                        .collect(),
+                );
+            }
+        }
+        None
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn preferred_linux_variation_keys() -> &'static [&'static str] {
+    match std::env::consts::ARCH {
+        "aarch64" => &["arm64_linux", "aarch64_linux"],
+        "x86_64" => &["x86_64_linux"],
+        _ => &[],
     }
 }
 
@@ -410,5 +479,50 @@ mod tests {
         let formula: Formula = serde_json::from_str(json).unwrap();
         assert!(formula.keg_only_reason.is_none());
         assert!(formula.is_keg_only());
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn runtime_dependencies_include_runtime_uses_from_macos_on_linux() {
+        let mut formula: Formula =
+            serde_json::from_str(include_str!("../../fixtures/formula_foo.json")).unwrap();
+        formula.dependencies = vec!["openssl@3".to_string()];
+        formula.uses_from_macos = vec![
+            UsesFromMacos::Plain("expat".to_string()),
+            UsesFromMacos::WithContext {
+                name: "pkgconf".to_string(),
+                context: "build".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            formula.runtime_dependencies(),
+            vec!["openssl@3".to_string(), "expat".to_string()]
+        );
+    }
+
+    #[test]
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    fn runtime_dependencies_use_linux_variation_dependencies() {
+        let mut formula: Formula =
+            serde_json::from_str(include_str!("../../fixtures/formula_foo.json")).unwrap();
+        formula.dependencies = vec!["openssl@3".to_string()];
+        formula.variations = Some(serde_json::json!({
+            "x86_64_linux": { "dependencies": ["openssl@3", "zlib-ng-compat"] },
+            "arm64_linux": { "dependencies": ["openssl@3", "zlib-ng-compat"] }
+        }));
+        formula.uses_from_macos = vec![UsesFromMacos::Plain("expat".to_string())];
+
+        assert_eq!(
+            formula.runtime_dependencies(),
+            vec![
+                "openssl@3".to_string(),
+                "zlib-ng-compat".to_string(),
+                "expat".to_string()
+            ]
+        );
     }
 }
